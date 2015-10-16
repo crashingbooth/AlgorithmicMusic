@@ -5,7 +5,7 @@ BasicCA {
 	*/
 
 
-	var <>width, <>prevState, <>nextState, <>started, <>history, <>midiout, <>windowSize, <>windowPos, <>window, <>scale, <>legato, <>tempo, <>cleanDisplay;
+	var <>width, <>prevState, <>nextState, <>started, <>history, <>midiout, <>windowSize, <>windowPos, <>window, <>scale, <>legato, <>tempo, <>cleanDisplay, <>myTask;
 
 
 	*new {|width, firstState, midiout|
@@ -87,25 +87,37 @@ BasicCA {
 			outputString = outputString ++ val.asString;
 			if (i == (this.windowPos + this.windowSize - 1), {outputString = outputString ++ "]"});
 		};
-		outputString.postln;
 
+		outputString.postln;
+	}
+
+	getCurrentAsString {|includeWindow = false|
+		var outputString = "";
+		this.nextState.do {|val,i|
+			outputString = outputString ++ val.asString;
+		}
+		^outputString;
 	}
 	playNext {
 		var patternFeed = [], pbs;
 		this.windowVals();
 		this.displayCurrent();
 		this.windowSize.do { |i|
+			// [this.windowSize, i,this.nextState[this.windowPos + i].asString, this.prevState[this.windowPos + i].asString].postln;
 			if (this.nextState[this.windowPos + i].asString != this.prevState[this.windowPos + i].asString,
 				{
 					switch (this.nextState[this.windowPos + i].asString,
 						"0", {patternFeed = patternFeed.add([i,\noteOff])},
 						"1", {patternFeed = patternFeed.add([i,\noteOn])}
-					)
+					);
 			});
 
-		this.getNext;
+			// this.getNext;
+			// patternFeed.postln;
+		/*^patternFeed;*/
+		};
+this.getNext;
 		^patternFeed;
-		}
 
 	}
 
@@ -117,9 +129,9 @@ BasicCA {
 
 	playThru { |tempo = 1|
 
-		var r, patternFeed;
+		var patternFeed;
 		this.tempo = tempo;
-		r = Task.new({loop {
+		this.myTask = Task.new({loop {
 			this.patternFeedToEvent(this.playNext());
 			this.tempo.wait} }).play;
 	}
@@ -203,6 +215,39 @@ CARules {
 
 	}
 
+}
+
+CA_Transmitter {
+	var <> myCA,  <>host, <>tempo;
+	classvar <>classVars;
+	*new { |myCA, tempo|
+		^super.new.init(myCA, tempo) }
+	*initClass {
+		// static constructor
+	}
+	init { |myCA, tempo |
+		this.myCA = myCA;
+		this.tempo = tempo;
+		this.host = NetAddr("localhost", 4859);
+	}
+
+	transmit {
+
+	TempoClock.default.sched(0,{this.sendPatterns();
+			this.tempo} );
+
+	/*	Routine.new(
+			{loop {
+				this.sendPatterns();
+				this.tempo.yield}
+		}).play;*/
+	}
+	sendPatterns {
+		// let's send the array as a string!
+		"here!".postln;
+		this.host.sendMsg("/current", this.myCA.getCurrentAsString());
+		this.host.sendMsg("/window", this.myCA.windowSize, this.myCA.windowPos);
+	}
 }
 /* TODO
 - create re-init, for when resetting stuff
