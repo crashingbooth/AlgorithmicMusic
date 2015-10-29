@@ -5,7 +5,7 @@ _livePlay allows relative position to be controlled in real time
 GradualMappingGUI uses the touchOSC gui 'gradualMappingGUI'*/
 
 GradualMapping {
-	var <> startList, <> destList, <>length, <>posInput, <>gradList, <>automaticMode;
+	var <> startList, <> destList, <>length, <>posInput, <>gradList, <>automaticMode, <>owner, <>slider;
 	*new { |startList, destList|
 		^super.new.init(startList, destList) }
 
@@ -16,9 +16,19 @@ GradualMapping {
 		this.automaticMode = false;
 		this.startList = startList;
 		this.destList = destList;
+		this.posInput = 0;
 
 
 	}
+
+	createSliders { |owner|
+		this.owner = owner;
+		this.slider = Slider(this.owner.master, 900@40)
+		.value_(0.0)
+		.action_({|sl| this.posInput = sl.value})
+		;
+	}
+
 	calculatePositions{|aList|
 		// converts a list of durations to a list of bar positions
 		var realPos = [], pos = 0;
@@ -166,7 +176,7 @@ GradualMapping {
 
 	getPos {
 		// overide this in controller versions
-		this.posInput  = 0;
+			// this.posInput  = this.slider.value;
 		^this.posInput;
 		// ^this.mouse.getSynchronous;
 	}
@@ -249,7 +259,7 @@ GradualMapping {
 			\stretch, stretch_,
 			\scale, Scale.chromatic
 
-			).play;
+		).play;
 
 		}
 }
@@ -305,18 +315,18 @@ GradualMappingGUI : GradualMapping {
 
 
 GradualMappingTransmitter {
-	var <>gradMappers, <>length, <>barStretch, <>host, <>count;
-	*new { |gradMappers, length, beatStretch|
-		^super.new.init(gradMappers,length, beatStretch) }
-	init { |gradMappers, length,beatStretch|
+	var <>gradMappers, <>length, <>barStretch, <>host, <>count, <>master;
+	*new { |length, beatStretch|
+		^super.new.init(length, beatStretch) }
+	init { |length,beatStretch|
 		this.length = length;
 
 		this.barStretch = (length*beatStretch);
-		this.gradMappers = gradMappers;
+		// this.gradMappers = gradMappers;
 		this.host = NetAddr("localhost", 4859);
 		this.count = 0;
-		this.initStart();
-		this.initDest();
+		/*this.initStart();
+		this.initDest();*/
 	}
 	transmit {
 		TempoClock.default.sched(0,{this.sendPatterns(this.getDataForTransmit(), "/current");
@@ -324,6 +334,18 @@ GradualMappingTransmitter {
 		// sendRoutine.play(TempoClock.default);
 
 
+	}
+
+	setGradMappersAndInit { |gradMappers|
+		this.gradMappers = gradMappers;
+		this.initStart();
+		this.initDest();
+		this.master = Window("GradMapper", 1000@220)
+		.front.alwaysOnTop_(true);
+		this.master.view.decorator_(FlowLayout(this.master.bounds, 10@10, 10@10));
+		this.gradMappers.do { |gm|
+			gm.createSliders(this);
+		}
 	}
 
 
