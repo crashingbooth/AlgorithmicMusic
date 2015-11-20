@@ -4,12 +4,14 @@ makesure isPlaying doesn't do stupid stuff
 */
 
 JPatternPlayerGUI{
-	var <>param1, <>param2,
-	<>param1Min, <>param1Max, <>param1TempMax, <>param1TempMin,
-	<>param2Min, <>param2Max, <>param2TempMax, <>param2TempMin,
+	var <>paramX, <>paramY,
+	/*<>paramXMin, <>paramXMax,*/
+	<>paramXTempMax, <>paramXTempMin,
+	/*<>paramYMin, <>paramYMax, */
+	<>paramYTempMax, <>paramYTempMin,
 	<>dur, <>density, <>units,
 	<>synth,
-	<>param1name, <>param2name, <>synthName,
+	<>paramXName, <>paramYName, <>synthName,
 	<>depth,
 	<>host,
 	<>voices,
@@ -23,10 +25,10 @@ JPatternPlayerGUI{
 	  <>labels, <>regenerateButton, <>revertButton, <>stitchButton, <>copyButton, <>saveButton, <>memoryButtonArray,<>volSlider,
 	<>densityControlView,
 	  <>densityLabel, <>densitySlider,
-	<>param1ControlView,
-	  <>param1Text, <>param1Slider,
-	<>param2ControlView,
-	  <>param2Text, <>param2Slider,
+	<>paramXControlView,
+	  <>paramXText, <>paramXSlider,
+	<>paramYControlView,
+	  <>paramYText, <>paramYSlider,
 	<>unitsControlView,
 	  <>unitButtons,
 	<>densityControlView,
@@ -34,23 +36,23 @@ JPatternPlayerGUI{
 	;
 
 	classvar <>alreadyExists;
-	*new { |synthName, dur, density, units, depth|
-		^super.new.init(synthName, dur, density, units, depth) }
+	*new { |mySynth, dur, density, units, depth|
+		^super.new.init(mySynth, dur, density, units, depth) }
 
 	*initClass {
 		//guarentee singleton
 		if (JPatternPlayerGUI.alreadyExists == true, {"ABORT".postln; ^nil},
 			{ JPatternPlayerGUI.alreadyExists = true; });
 	}
-	init { | synthName, dur, density, units, depth|
+	init { | mySynth, dur, density, units, depth|
 		// instance constructor
 
 		this.density = density;
 		if (depth == nil, {this.depth = 5}, {this.depth = depth});
 		this.units = units;
 		this.dur = dur;
-		this.synth = synthName;
-		this.synthName = synthName;
+		this.synth = mySynth; // a SynthForXYPlayer, see GUIforXYPlayer
+		this.synthName = mySynth.synthName;
 		this.host = NetAddr("localhost", 4859);
 
 		this.initializeSynth();
@@ -69,6 +71,7 @@ JPatternPlayerGUI{
 
 	createVoices {
 		this.voices = [JPatternPlayerVoice(this, \main, 1), JPatternPlayerVoice(this, \alt, -1)];
+		this.voices[0].postln;
 	}
 
 	createDesc {
@@ -77,60 +80,11 @@ JPatternPlayerGUI{
 	}
 
 	initializeSynth {
-		case
-		{this.synthName == \ringModPlayer}
-		{
-			SynthDef(\ringModPlayer, {|mod_freq = 2, depth = 800, amp= 0.2, pan= 0|
-				var imp, sig, out;
-				sig = SinOsc.ar(400 // the carrier and the carrier frequency
-					+ SinOsc.ar(mod_freq,0,depth), 0,0.5)*amp;
-				out = Out.ar(0, sig!2);
-			}).add;
-			this.param1Min = 10;
-			this.param1Max = 2000;
-			this.param2Min = 5;
-			this.param2Max = 1000;
-			this.param1name = \mod_freq;
-			this.param2name = \depth;
 
-		}
-		{this.synthName == \formletPlayer}
-		{
-
-			SynthDef(\formletPlayer, {|imp_freq = 2, form_freq = 800, amp= 0.2, pan= 0|
-				var imp, sig, out;
-				imp = Impulse.ar(imp_freq, 0, 0.4);
-				sig = Formlet.ar(imp, form_freq, 0.01, 0.1)*amp;
-				Out.ar(0, sig!2);
-			}).add;
-
-			this.param1Min = 200;
-			this.param1Max = 1000;
-			this.param2Min = 2;
-			this.param2Max = 300;
-			this.param1name = \form_freq;
-			this.param2name = \imp_freq;
-		}
-		{this.synthName == \BPFSawPlayer}
-		{
-			SynthDef(\BPFSawPlayer, {|freq = 2, q = 0.4, amp= 0.8, pan= 0, pitch = 100|
-				var imp, sig, out;
-				sig = BPF.ar(Saw.ar(pitch), freq, q, 0.4)*amp;
-				Out.ar(0, Pan2.ar(sig, pan));
-			}).add;
-
-			this.param1Min = 1e2;
-			this.param1Max = 1e3;
-			this.param2Min = 1;
-			this.param2Max = 10;
-			this.param1name = \freq;
-			this.param2name = \pitch;
-
-		};
-		this.param1TempMax = this.param1Max;
-		this.param1TempMin = this.param1Min;
-		this.param2TempMax = this.param2Max;
-		this.param2TempMin = this.param2Min;
+		this.paramXTempMax = this.synth.paramXMax;
+		this.paramXTempMin = this.synth.paramXMin;
+		this.paramYTempMax = this.synth.paramYMax;
+		this.paramYTempMin = this.synth.paramYMin;
 
 
 	}
@@ -140,6 +94,7 @@ JPatternPlayerGUI{
 
 		this.master = Window(this.synthName.asString, Rect(1300,0, 1020, 750)).front.alwaysOnTop_(true);
 		this.master.view.decorator_(FlowLayout(this.master.bounds, this.m@this.m, this.m@this.m));
+		this.master.onClose_({this.end()});
 
 		// playControlsView (top)
 		this.playControlsView = CompositeView(this.master, 1000@(this.sec));
@@ -239,34 +194,34 @@ JPatternPlayerGUI{
 
 
 		// parmControls
-		this.param1ControlView = CompositeView(this.master, (1000)@(80));
-		this.param1ControlView.decorator_(FlowLayout(this.param1ControlView.bounds, this.m@this.m, this.m@this.m));
-		this.param1ControlView.background_(Color.black);
+		this.paramXControlView = CompositeView(this.master, (1000)@(80));
+		this.paramXControlView.decorator_(FlowLayout(this.paramXControlView.bounds, this.m@this.m, this.m@this.m));
+		this.paramXControlView.background_(Color.black);
 
-		this.param1Text = StaticText(this.param1ControlView, this.w@this.h)
-		  .string_(this.param1name)
+		this.paramXText = StaticText(this.paramXControlView, this.w@this.h)
+		  .string_(this.synth.paramXName)
 		  .stringColor_(Color.white);
 
-		this.param1Slider = RangeSlider(this.param1ControlView, 900@this.h)
+		this.paramXSlider = RangeSlider(this.paramXControlView, 900@this.h)
 		.lo_(0)
 		.hi_(0.2)
-		.action_({|sl| this.param1TempMin = this.map(sl.lo, this.param1Min, this.param1Max);
-			this.param1TempMax = this.map(sl.hi, this.param1Min, this.param1Max) });
+		.action_({|sl| this.paramXTempMin = this.map(sl.lo, this.synth.paramXMin, this.synth.paramXMax);
+			this.paramXTempMax = this.map(sl.hi, this.synth.paramXMin, this.synth.paramXMax) });
 
 
-		this.param2ControlView = CompositeView(this.master, (1000)@(80));
-		this.param2ControlView.decorator_(FlowLayout(this.param2ControlView.bounds, this.m@this.m, this.m@this.m));
-		this.param2ControlView.background_(Color.black);
+		this.paramYControlView = CompositeView(this.master, (1000)@(80));
+		this.paramYControlView.decorator_(FlowLayout(this.paramYControlView.bounds, this.m@this.m, this.m@this.m));
+		this.paramYControlView.background_(Color.black);
 
-		this.param2Text = StaticText(this.param2ControlView, this.w@this.h)
-		  .string_(this.param2name)
+		this.paramYText = StaticText(this.paramYControlView, this.w@this.h)
+		  .string_(this.synth.paramYName)
 		  .stringColor_(Color.white);
 
-		this.param2Slider = RangeSlider(this.param2ControlView, 900@this.h)
+		this.paramYSlider = RangeSlider(this.paramYControlView, 900@this.h)
 		.lo_(0)
 		.hi_(0.2)
-		.action_({|sl| this.param2TempMin = this.map(sl.lo, this.param2Min, this.param2Max);
-			this.param2TempMax = this.map(sl.hi, this.param2Min, this.param2Max) });
+		.action_({|sl| this.paramYTempMin = this.map(sl.lo, this.synth.paramYMin, this.synth.paramYMax);
+			this.paramYTempMax = this.map(sl.hi, this.synth.paramYMin, this.synth.paramYMax) });
 
 		this.densityControlView  = CompositeView(this.master, 1000@80);
 		this.densityControlView.decorator_(FlowLayout(this.densityControlView.bounds, this.m@this.m, this.m@this.m));
@@ -322,6 +277,12 @@ JPatternPlayerGUI{
 		^inVal.linexp(0.0, 1.0, minRange, maxRange);
 	}
 
+	end{
+		this.voices.do { |voice|
+			voice.pmono.stop();
+		}
+	}
+
 }
 
 JPatternPlayerVoice {
@@ -366,19 +327,19 @@ JPatternPlayerVoice {
 	// maybe need to subclass this:
 	doPmono{
 		var send;
-	/*	send =  {
-			// [~name, ~p1, ~p2, ~amp].postln;
+		send =  {
+			[~name, ~p1, ~p2, ~amp].postln;
 			// this.owner.host.sendMsg(~name, ~p1, ~p2.asInteger, ~amp.asFloat);
 		this.owner.host.sendMsg(~name, ~p1, ~p2, ~amp.asFloat);
-	};*/
+	};
 
 		this.pmono = Pmono( this.owner.synthName,
-			[this.owner.param1name,this.owner.param2name, \ampIn], Pn(Plazy{Pseq(this.current)}),
-			// [\p1,\p2, \amp], Pn(Plazy{Pseq(this.current)}),
+			[this.owner.synth.paramXName,this.owner.synth.paramYName, \ampIn], Pn(Plazy{Pseq(this.current)}),
+			[\p1,\p2, \amp], Pn(Plazy{Pseq(this.current)}),
 			\amp, Pkey(\ampIn)*Pn(Plazy{this.volMod}),
 			\dur, this.owner.dur,
 			\name, this.name,
-			// \finish, send,
+			\finish, send,
 			\pan, this.panPos;
 
 		).play();
@@ -408,8 +369,8 @@ JPatternPlayerVoice {
 			var p1 = 0.0, p2 = 0,  amp, basicAmp = 0.6;
 			if (deleteList[i] == 0, {amp = 0}, {amp = basicAmp});
 
-			p1 = exprand(this.owner.param1TempMin, this.owner.param1TempMax);
-			p2 = exprand(this.owner.param2TempMin, this.owner.param2TempMax);
+			p1 = exprand(this.owner.paramXTempMin, this.owner.paramXTempMax);
+			p2 = exprand(this.owner.paramYTempMin, this.owner.paramYTempMax);
 
 			val.do {
 				res = res.add([p1, p2, amp])
