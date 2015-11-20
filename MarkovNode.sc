@@ -138,9 +138,31 @@ MarkovQueue {
 
 }
 
+MarkovPlayerDrumManager {
+	var <>tempoclock, <>midiout, <>drums, <>isPlaying;
+	*new { |tempoclock, midiout|
+		^super.new.init(tempoclock, midiout) }
+	init { |tempoclock, midiout|
+		this.tempoclock = tempoclock;
+		this.midiout = midiout;
+		this.isPlaying = false;
+	}
+
+	playDrums {
+		if (this.isPlaying == false, {
+			this.isPlaying = true;
+			this.drums = DrumPlayer(this.midiout, this.tempoclock);
+			this.drums.playMode_(\playSingle);
+			this.drums.setCurrentPattern(this.drums.generatePattern(2,4,minDensity: 0.2, maxDensity: 0.5));
+			this.drums.play();
+	});
+	}
+}
+
+
 MarkovPlayer {
 	// listening to channel 2(1 in sc), playing on channel 3(2 in sc)
-	var <>markovRoot, <>listener, <>midiout, <>meterTreeOutput, <>count, <>voicedLimit, <>myPbind ,<>autoRegenMode, <>tempoclock, <>drums, <>length, <>depth, <>mode, <>legato;
+	var <>markovRoot, <>listener, <>midiout, <>meterTreeOutput, <>count, <>voicedLimit, <>myPbind ,<>autoRegenMode, <>tempoclock, <>drumManager, <>length, <>depth, <>mode, <>legato;
 	*new { |nOrder|
 		^super.new.init(nOrder) }
 	init { |nOrder|
@@ -155,6 +177,7 @@ MarkovPlayer {
 		this.depth = 4; // default
 		this.mode = 'meterTree_stable';
 		this.legato = 0.5;
+		this.drumManager = MarkovPlayerDrumManager(this.tempoclock, this.midiout);
 		this.listener(MarkovInputListener(this.markovRoot));
 	}
 
@@ -193,7 +216,7 @@ MarkovPlayer {
 		var result; // passage of length L
 		// make sure that model isn't empty
 
-		["before", this.mode].postln;
+		this.drumManager.playDrums();
 		if (this.markovRoot.nodeDict.size == 0, {this.mode = 'blank'});
 
 		case
@@ -211,13 +234,6 @@ MarkovPlayer {
 		var drum;
 
 		if (this.meterTreeOutput == nil, {this.generateMeterTreeOutput});
-		this.drums = DrumPlayer(this.midiout, this.tempoclock);
-		this.drums.playMode_(\playSingle);
-
-		this.drums.setCurrentPattern(this.drums.generatePattern(2,4,minDensity: 0.2, maxDensity: 0.5));
-
-		// set mode here
-		this.drums.play();
 		this.myPbind = Pbind (
 			\type, \midi,
 			\midiout, this.midiout,
@@ -453,18 +469,18 @@ MarkovPlayerGUI {
 
 	drum_behaviour { |behaviour|
 		// \playSingle, \playLastTwo, \playRegularPolymetric
-		this.markovPlayer.drums.playMode = behaviour;
+		this.markovPlayer.drumManager.drums.playMode = behaviour;
 		this.updateDrumLabels();
 	}
 
 	drum_restoreLastPattern {
-		this.markovPlayer.drums.restoreLastPattern()
+		this.markovPlayer.drumManager.drums.restoreLastPattern()
 	}
 
 
 
 	drum_polymetricFill { |numBars, unit|
-		this.markovPlayer.drums.polymetricFill(numBars,unit);
+		this.markovPlayer.drumManager.drums.polymetricFill(numBars,unit);
 		//e.g. this.drums.polymetricFill(1,3) -> one bar of triplets
 		this.updateDrumLabels();
 	}
@@ -473,7 +489,7 @@ MarkovPlayerGUI {
 		var minDens, maxDens;
 		minDens = this.localMinDensity;
 		maxDens = this.localMaxDensity;
-		this.markovPlayer.drums.evolveLastFill(minDens, maxDens);
+		this.markovPlayer.drumManager.drums.evolveLastFill(minDens, maxDens);
 		this.updateDrumLabels();
 	}
 
@@ -481,27 +497,31 @@ MarkovPlayerGUI {
 		var minDens, maxDens;
 		minDens = this.localMinDensity;
 		maxDens = this.localMaxDensity;
-		this.drum_setCurrentPattern(this.markovPlayer.drums.generatePattern(unitLength,numReps,minDensity: minDens, maxDensity: maxDens));
+		this.drum_setCurrentPattern(this.markovPlayer.drumManager.drums.generatePattern(unitLength,numReps,minDensity: minDens, maxDensity: maxDens));
 
 	}
 
 	drum_getCurrentPattern {
-		^this.markovPlayer.drums.currentPattern;
+		^this.markovPlayer.drumManager.drums.currentPattern;
 	}
 
 	drum_setCurrentPattern { |pattern|
-		this.markovPlayer.drums.setCurrentPattern(pattern);
+		this.markovPlayer.drumManager.drums.setCurrentPattern(pattern);
 		this.updateDrumLabels();
 	}
 	updateDrumLabels {
-		this.drumCurrentPatternLabel.string_(this.markovPlayer.drums.currentPattern.name);
-		this.drumLastPatternLabel.string_(this.markovPlayer.drums.lastPattern.name)
+		this.drumCurrentPatternLabel.string_(this.markovPlayer.drumManager.drums.currentPattern.name);
+		this.drumLastPatternLabel.string_(this.markovPlayer.drumManager.drums.lastPattern.name)
 	}
 
 	end {
 		this.markovPlayer.myPbind.stop();
-		this.markovPlayer.drums.pb.stop();
-		this.markovPlayer.drums.beatsched.clear;
+		this.markovPlayer.drumManager.drums.pb.stop();
+		this.markovPlayer.drumManager.drums.beatsched.clear;
+		this.markovPlayer.midiout.allNotesOff(0);
+		this.markovPlayer.midiout.allNotesOff(1);
+		this.markovPlayer.midiout.allNotesOff(2);
+		this.markovPlayer.drumManager.isPlaying = false;
 	}
 
 
