@@ -5,7 +5,7 @@ _livePlay allows relative position to be controlled in real time
 GradualMappingGUI uses the touchOSC gui 'gradualMappingGUI'*/
 
 GradualMapping {
-	var <> startList, <> destList, <>length, <>posInput, <>gradList, <>automaticMode, <>owner, <>slider;
+	var <> startList, <> destList, <>length, <>posInput, <>gradList, <>automaticMode, <>owner, <>slider, <>pbs, <>midiout;
 	*new { |startList, destList|
 		^super.new.init(startList, destList) }
 
@@ -27,6 +27,11 @@ GradualMapping {
 		.value_(0.0)
 		.action_({|sl| this.posInput = sl.value})
 		;
+	}
+
+	setSlider { |newValue|
+		this.slider.value = newValue;
+		this.posInput = newValue;
 	}
 
 	calculatePositions{|aList|
@@ -153,11 +158,11 @@ GradualMapping {
 	}
 
 	scheduledGradation {|flatList, midiout, note_, chan_, stretch_|
-		var pbs;
+		this.midiout = midiout;
 		this.automaticMode = true;
-		pbs = 	Pbind (
+		this.pbs = 	Pbind (
 			\type, \midi,
-			\midiout, midiout,
+			\midiout, this.midiout,
 			[\dur, \degree], Pseq(flatList),
 			\root, note_,
 			\chan, chan_,
@@ -247,12 +252,12 @@ GradualMapping {
 
 	livePlay {|midiout, note_, chan_, stretch_ = 0.1|
 		// manually control relative position
-		var pbs;
+		this.midiout = midiout;
 
 
-		pbs = 	Pbind (
+		this.pbs = 	Pbind (
 			\type, \midi,
-			\midiout, midiout,
+			\midiout, this.midiout,
 	        [\dur,\degree], Pn(Plazy { Pseq(this.getCurrentFromPos()) }),
 			\root, note_,
 			\chan, chan_,
@@ -313,6 +318,93 @@ GradualMappingGUI : GradualMapping {
 
 }
 
+GradualMapperGUISet {
+	//basically GradMappingTransmitter without any of the OSC stuff that it was originally made for
+	var <>gradMappers, <>master, <>stretch, <>midiout, <>presetView, <>presetButtonArray, <>h;
+	*new { |length, stretch|
+		^super.new.init(length,stretch) }
+	init { |gradMappersDataArray, stretch|
+		this.h = 50;
+		MIDIClient.init;
+		this.midiout = MIDIOut(0);
+		this.master = Window("GradMapper", 1000@((1 + gradMappersDataArray.size)*h + 10))
+		.front.alwaysOnTop_(true);
+		this.master.onClose_({this.end()});
+		this.master.view.decorator_(FlowLayout(this.master.bounds, 10@10, 10@10));
+		this.makeButtons();
+		this.gradMappers = Array.fill( gradMappersDataArray.size, {
+			arg i;
+			GradualMapping(gradMappersDataArray[i][0], gradMappersDataArray[i][1])
+				.livePlay(this.midiout, 0, i, stretch)
+				.createSliders(this);
+		})
+
+
+	}
+
+	makeButtons {
+		var w = 70;
+		this.presetView = HLayoutView(this.master, 900@h);
+		this.presetView.background(Color.red(0.6));
+		this.presetButtonArray.add(Button(this.presetView, w@(h-10))
+			.action_({this.setConfiguration([0.03,0.025,0.031,0.03,0.025,0.031])})
+			.states_([["L-offset", Color(), Color.gray(0.9)]])
+		);
+		this.presetButtonArray.add(Button(this.presetView, w@(h-10))
+			.action_({this.setConfiguration([0.03,0.98,0.031,0.03,0.97,0.031])})
+			.states_([["Start", Color(), Color.gray(0.9)]])
+		);
+		this.presetButtonArray.add(Button(this.presetView, w@(h-10))
+			.action_({this.setConfiguration([0.03,0.5,0.98,0.03,0.5,0.97])})
+			.states_([["fanned", Color(), Color.gray(0.9)]])
+		);
+		this.presetButtonArray.add(Button(this.presetView, w@(h-10))
+			.action_({this.setConfiguration([0.03,0.5,0.98,0.28,0.31,0.34])})
+			.states_([["chiggersL", Color(), Color.gray(0.9)]])
+		);
+		this.presetButtonArray.add(Button(this.presetView, w@(h-10))
+			.action_({this.setConfiguration([0.03,0.5,0.98,0.78,0.81,0.84])})
+			.states_([["chiggersR", Color(), Color.gray(0.9)]])
+		);
+		this.presetButtonArray.add(Button(this.presetView, w@(h-10))
+			.action_({this.setConfiguration([0.03,0.5,0.48,0.75,0.31,0.34])})
+			.states_([["groove 4", Color(), Color.gray(0.9)]])
+		);
+		this.presetButtonArray.add(Button(this.presetView, w@(h-10))
+			.action_({this.setConfiguration([0.99,0.5,0.48,0.75,0.31,0.34])})
+			.states_([["groove 8 ", Color(), Color.gray(0.9)]])
+		);
+		this.presetButtonArray.add(Button(this.presetView, w@(h-10))
+			.action_({this.setConfiguration([0.5,0.02,0.48,0.75,0.31,0.34])})
+			.states_([["groove 4 inv ", Color(), Color.gray(0.9)]])
+		);
+		this.presetButtonArray.add(Button(this.presetView, w@(h-10))
+			.action_({this.setConfiguration([0,0,0,1,1,1])})
+			.states_([["4-10", Color(), Color.gray(0.9)]])
+		);
+		this.presetButtonArray.add(Button(this.presetView, w@(h-10))
+			.action_({this.setConfiguration([1,1,1,0,0,0])})
+			.states_([["5-8", Color(), Color.gray(0.9)]])
+		);
+
+	}
+
+	end {
+		this.gradMappers.do { |gm, i|
+			gm.pbs.stop();
+			this.midiout.allNotesOff(i);
+		}
+	}
+
+	setConfiguration {|config|
+		this.gradMappers.do { |gm, i|
+			gm.setSlider(config[i]);
+		}
+	}
+
+
+
+}
 
 GradualMappingTransmitter {
 	var <>gradMappers, <>length, <>barStretch, <>host, <>count, <>master;

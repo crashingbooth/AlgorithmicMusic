@@ -149,12 +149,14 @@ MarkovPlayerDrumManager {
 	}
 
 	playDrums {
+		var aTask;
 		if (this.isPlaying == false, {
 			this.isPlaying = true;
 			this.drums = DrumPlayer(this.midiout, this.tempoclock);
 			this.drums.playMode_(\playSingle);
 			this.drums.setCurrentPattern(this.drums.generatePattern(2,4,minDensity: 0.2, maxDensity: 0.5));
-			this.drums.play();
+			aTask = Task({
+				this.drums.play();}).play(this.tempoclock, quant:[4,0]);
 	});
 	}
 }
@@ -162,22 +164,22 @@ MarkovPlayerDrumManager {
 
 MarkovPlayer {
 	// listening to channel 2(1 in sc), playing on channel 3(2 in sc)
-	var <>markovRoot, <>listener, <>midiout, <>meterTreeOutput, <>count, <>voicedLimit, <>myPbind ,<>autoRegenMode, <>tempoclock, <>drumManager, <>length, <>depth, <>mode, <>legato;
-	*new { |nOrder|
-		^super.new.init(nOrder) }
-	init { |nOrder|
+	var <>markovRoot, <>listener, <>midiout, <>meterTreeOutput, <>count, <>voicedLimit, <>myPbind ,<>autoRegenMode, <>tempoclock, <>drumManager, <>length, <>depth, <>mode, <>legato, <>outChannel;
+	*new { |nOrder, outChannel, tempoclock|
+		^super.new.init(nOrder,outChannel, tempoclock) }
+	init { |nOrder, outChannel, tempoclock|
 		this.markovRoot = MarkovRoot(nOrder);
 		MIDIClient.init;
 		this.count = -1;
 		this.midiout =  MIDIOut(0);
 		this.voicedLimit = 1.0;
 		this.autoRegenMode = false;
-		this.tempoclock = TempoClock.new(130/60);
+		this.tempoclock = tempoclock;
 		this.length = 16; //default
-		this.depth = 4; // default
+		this.depth = 6; // default
 		this.mode = 'meterTree_stable';
 		this.legato = 0.5;
-		this.drumManager = MarkovPlayerDrumManager(this.tempoclock, this.midiout);
+		this.outChannel = outChannel;
 		this.listener(MarkovInputListener(this.markovRoot));
 	}
 
@@ -212,11 +214,11 @@ MarkovPlayer {
 		^this.meterTreeOutput;
 	}
 
-	getOutput {
+	getData {
 		var result; // passage of length L
 		// make sure that model isn't empty
 
-		this.drumManager.playDrums();
+
 		if (this.markovRoot.nodeDict.size == 0, {this.mode = 'blank'});
 
 		case
@@ -229,9 +231,14 @@ MarkovPlayer {
 		result.postln;
 		^result
 	}
+	getOutput {
+		// wrapper function for getData, override in subclass
+		^this.getData();
+
+	}
 
 	playMeterTreeOutput {
-		var drum;
+
 
 		if (this.meterTreeOutput == nil, {this.generateMeterTreeOutput});
 		this.myPbind = Pbind (
@@ -239,10 +246,10 @@ MarkovPlayer {
 			\midiout, this.midiout,
 			[\midinote, \dur],  Pn(Plazy {Pseq(this.getOutput)}),
 			// [\midinote, \dur],  Pn(Plazy {Pseq(this.meterTreeOutput,1)}),
-			\chan, 2,
+			\chan, this.outChannel,
 			\stretch, 1,
 			\legato, Pn(Plazy {this.legato})
-		).play(this.tempoclock);
+		).play(this.tempoclock,quant:[4,0]);
 
 	}
 
@@ -268,6 +275,37 @@ MarkovPlayer {
 	restartInput {
 		this.markovRoot.restartInput();
 	}
+	end {
+		this.myPbind.stop();
+		this.midiout.allNotesOff(this.outChannel);
+	}
+
+}
+
+MarkovPlayerWithDrums : MarkovPlayer {
+	var <>drumManager;
+	*new { |nOrder, midiout, tempoclock|
+		^super.new(nOrder, midiout, tempoclock).sub_init() }
+
+	sub_init {
+		this.drumManager = MarkovPlayerDrumManager(this.tempoclock, this.midiout);
+	}
+	end {
+		// override superclass for drum handling
+		this.myPbind.stop();
+		this.drumManager.drums.pb.stop();
+		this.drumManager.drums.beatsched.clear;
+		this.midiout.allNotesOff(this.outChannel);
+		this.drumManager.isPlaying = false;
+	}
+	getOutput {
+		// wrapper function for getData, override in subclass
+		this.drumManager.playDrums();
+		^this.getData
+
+	}
+
+
 }
 
 MarkovInputListener {
@@ -285,27 +323,27 @@ MarkovInputListener {
 }
 
 MarkovPlayerGUI {
-	var <>markovPlayer,
+	var <>markovPlayer, <>auxMarkovPlayer,
 	<>master, <>w,<>h,<>m,<>sec,<>wid,
 	<>topLineView,
 	  <>inputRestartButton, <>resetButton, <>mostRecentText,
-	<>playView,
-	  <>modesList, <>modesView,
-	  <>playButton, <>stopButton, <>regenButton, <>autoRegenButton,
-	  <>silenceSlider, <>legatoSlider,
+	<>playViewSec,
+
 	<>drumView, <>drumModeView,
 	<>drum_regularButton, <>drum_playSingleButton,<>drum_last2Button, <>drum_revertButton,
-<>drum_evolveButton, <>fill1Buttons, <>fill2Buttons, <>localMinDensity, <>localMaxDensity, <>drum_fillDensitySlider, <>drum_recButtons ,<>drum_playButtons,<>drum_bank,<>drumCurrentString, <>drumLastString,<>drumCurrentPatternLabel,<>drumLastPatternLabel,<>fill3Buttons
+<>drum_evolveButton, <>fill1Buttons, <>fill2Buttons, <>localMinDensity, <>localMaxDensity, <>drum_fillDensitySlider, <>drum_recButtons ,<>drum_playButtons,<>drum_bank,<>drumCurrentString, <>drumLastString,<>drumCurrentPatternLabel,<>drumLastPatternLabel,<>fill3Buttons, <>tempoclock
 	;
 
-	*new {|nOrder = 2|
-		^super.new.init(nOrder) }
-	init {|nOrder|
-		this.markovPlayer = MarkovPlayer(nOrder);
+	*new {|nOrder = 2,tempo |
+		^super.new.init(nOrder, tempo) }
+	init {|nOrder, tempo|
+		this.tempoclock = TempoClock(tempo);
+		this.markovPlayer = MarkovPlayerWithDrums(nOrder,2, this.tempoclock);
+		this.auxMarkovPlayer = MarkovPlayer(nOrder,3, this.tempoclock);
 		this.w = 80;
 		this.h = 40;
 		this.m = 10;
-		this.wid = 650;
+		this.wid = 850;
 		this.sec = (this.h + this.m + this.m);
 		this.buildGUI();
 	}
@@ -313,6 +351,7 @@ MarkovPlayerGUI {
 	*globalKeyDownAction {|view, char|
 			if (char == ' ', { this.markovPlayer.restartInput(); "hi".postln;})}
 	buildGUI {
+		var playViewSec;
 		this.master = Window("MarkovPlayer",  Rect(1300,0, this.wid, 1000)).front.alwaysOnTop_(true);
 		this.master.view.decorator_(FlowLayout(this.master.bounds, this.m@this.m, this.m@this.m));
 		this.master.onClose_({this.end()});
@@ -334,47 +373,10 @@ MarkovPlayerGUI {
 			});
 
 
-
-		this.playView = CompositeView(this.master, (this.wid -20)@(this.sec + (2*this.h) + this.m));
-		this.playView.decorator_(FlowLayout(this.playView.bounds, this.m@this.m, this.m@this.m));
-		this.playView.background_(Color.black);
-
-		this.playButton = Button(this.playView, this.w@this.h)
-			.states_([["play", Color.black]])
-			.action_({
-			  this.markovPlayer.playMeterTreeOutput();
-			});
-
-		this.stopButton = Button(this.playView, this.w@this.h)
-			.states_([["stop", Color.black]])
-			.action_({
-			this.end();
-			});
-		this.regenButton = Button(this.playView, this.w@this.h)
-			.states_([["regen", Color.black]])
-			.action_({ this.markovPlayer.generateMeterTreeOutput();
-		});
-		this.autoRegenButton = Button(this.playView, this.w@this.h)
-			.states_([["autoRegenOff", Color.gray], ["autoRegenOn", Color.blue]])
-			.action_({ this.markovPlayer.autoRegenMode = not(this.markovPlayer.autoRegenMode);
-
-		});
-		this.modesList = [ 'meterTree_stable','meterTree1', 'meterTree2', 'meterTree4', 'simple', 'blank'];
-		this.modesView = ListView(this.playView ,(this.w*2)@(2*this.h))
-        .items_(this.modesList)
-        .background_(Color.clear)
-        .hiliteColor_(Color.green(alpha:0.6))
-        .action_({|textList|this.markovPlayer.mode = this.modesList[textList.value]    });
+		this.playViewSec = MarkovGUIPlayViewSection(this.master, this.markovPlayer, this.wid, this.sec, this.h, this.m, this.w);
+		this.playViewSec = MarkovGUIPlayViewSection(this.master, this.auxMarkovPlayer, this.wid, this.sec, this.h, this.m, this.w);
 
 
-
-
-		this.silenceSlider = Slider(this.playView, (this.wid -(this.m*4))@(this.h/2))
-			.value_(0.9)
-			.action_({|sl| this.markovPlayer.voicedLimit = sl.value});
-		this.legatoSlider = Slider(this.playView, (this.wid -(this.m*4))@(this.h/2))
-			.value_(0.3)
-			.action_({|sl| this.markovPlayer.legato = sl.value});
 		this.drumView = CompositeView(this.master, 600@550);
 		this.makeDrumViewSection()
 	}
@@ -398,8 +400,8 @@ MarkovPlayerGUI {
 		.states_([["single repeat", Color(), Color.gray(0.9)]])
 		.action_({this.drum_behaviour(\playSingle)});
 		this.drum_last2Button = Button(this.drumModeView,w )
-		.states_([["2 bar repeat", Color(), Color.gray(0.9)]]);
-		// .action_({this.drum_behaviour(\playLastTwo)});
+		.states_([["2 bar repeat", Color(), Color.gray(0.9)]])
+		.action_({this.drum_behaviour(\playLastTwo)});
 		changeView = HLayoutView(this.drumView, Rect(0,0,250,this.h));
 		this.drum_revertButton = Button(changeView,w )
 		.states_([["revert", Color(), Color.gray(0.9)]])
@@ -513,15 +515,69 @@ MarkovPlayerGUI {
 		this.drumCurrentPatternLabel.string_(this.markovPlayer.drumManager.drums.currentPattern.name);
 		this.drumLastPatternLabel.string_(this.markovPlayer.drumManager.drums.lastPattern.name)
 	}
-
 	end {
-		this.markovPlayer.myPbind.stop();
-		this.markovPlayer.drumManager.drums.pb.stop();
-		this.markovPlayer.drumManager.drums.beatsched.clear;
-		this.markovPlayer.midiout.allNotesOff(0);
-		this.markovPlayer.midiout.allNotesOff(1);
-		this.markovPlayer.midiout.allNotesOff(2);
-		this.markovPlayer.drumManager.isPlaying = false;
+		this.markovPlayer.end();
+		this.auxMarkovPlayer.end();
+	}
+
+
+}
+
+MarkovGUIPlayViewSection {
+	var <>playView, <>master, <>wid, <>sec, <>h, <>m, <>w, <>markovPlayer,
+	<>modesList, <>modesView, <>playButton, <>stopButton, <>regenButton, <>silenceSlider, <>legatoSlider;
+
+	*new { |master, markovPlayer, wid, sec, h, m, w|
+		^super.new.init(master, markovPlayer, wid, sec, h, m, w) }
+
+	init { |master, markovPlayer, wid, sec, h, m, w|
+		this.master = master;
+		this.markovPlayer = markovPlayer;
+		this.wid = wid; this.sec = sec;
+		this.h = h; this.m = m; this.w = w;
+		this.buildPlayView();
+	}
+
+	buildPlayView {
+
+		this.playView = CompositeView(this.master, ((this.wid -30)/2)@((this.sec) + (2*this.h) + this.m));
+		this.playView.decorator_(FlowLayout(this.playView.bounds, this.m@this.m, this.m@this.m));
+		this.playView.background_(Color.black);
+
+		this.playButton = Button(this.playView, this.w@this.h)
+			.states_([["play", Color.black]])
+			.action_({
+			  this.markovPlayer.playMeterTreeOutput();
+			});
+
+		this.stopButton = Button(this.playView, this.w@this.h)
+			.states_([["stop", Color.black]])
+			.action_({
+			this.markovPlayer.end();
+			});
+		this.regenButton = Button(this.playView, this.w@this.h)
+			.states_([["regen", Color.black]])
+			.action_({ this.markovPlayer.generateMeterTreeOutput();
+		});
+
+
+
+		this.modesList = [ 'meterTree_stable','meterTree1', 'meterTree2', 'meterTree4', 'simple', 'blank'];
+		this.modesView = ListView(this.playView ,((this.w*2) - 50)@(2*this.h))
+        .items_(this.modesList)
+        .background_(Color.clear)
+        .hiliteColor_(Color.green(alpha:0.6))
+        .action_({|textList|this.markovPlayer.mode = this.modesList[textList.value]    });
+
+		this.silenceSlider = Slider(this.playView, ((this.wid/2) -(this.m*4))@(this.h/2))
+			.value_(0.9)
+			.action_({|sl| this.markovPlayer.voicedLimit = sl.value});
+		this.legatoSlider = Slider(this.playView, ((this.wid/2) -(this.m*4))@(this.h/2))
+			.value_(0.3)
+			.action_({|sl| this.markovPlayer.legato = sl.value});
+
+
+
 	}
 
 
